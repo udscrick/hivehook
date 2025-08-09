@@ -6,84 +6,86 @@ import { EndpointForm } from './components/EndpointForm';
 import { RequestLog } from './components/RequestLog';
 import { RequestDetails } from './components/RequestDetails';
 import { MockEndpoint, RequestLog as RequestLogType } from './types';
-import { useLocalStorage } from './hooks/useLocalStorage';
-import { Search, Filter, Download, Upload } from 'lucide-react';
+import { Search, Download, Upload } from 'lucide-react';
+import {
+  getEndpoints,
+  getLogs,
+  createEndpoint,
+  updateEndpoint,
+  deleteEndpoint,
+} from './api';
 
 function App() {
-  const [endpoints, setEndpoints] = useLocalStorage<MockEndpoint[]>('mockflow-endpoints', []);
-  const [logs, setLogs] = useLocalStorage<RequestLogType[]>('mockflow-logs', []);
+  const [endpoints, setEndpoints] = useState<MockEndpoint[]>([]);
+  const [logs, setLogs] = useState<RequestLogType[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingEndpoint, setEditingEndpoint] = useState<MockEndpoint | undefined>();
   const [selectedRequest, setSelectedRequest] = useState<RequestLogType | undefined>();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState('');
 
-  // Simulate request logs for demonstration
+  // Initial load
   useEffect(() => {
-    const simulateRequest = () => {
-      if (endpoints.length === 0) return;
-      
-      const activeEndpoints = endpoints.filter(e => e.isActive);
-      if (activeEndpoints.length === 0) return;
+    (async () => {
+      try {
+        const [eps, ls] = await Promise.all([getEndpoints(), getLogs(200)]);
+        setEndpoints(eps);
+        setLogs(ls);
+      } catch (e) {
+        console.error('Failed to load data', e);
+      }
+    })();
+  }, []);
 
-      const randomEndpoint = activeEndpoints[Math.floor(Math.random() * activeEndpoints.length)];
-      const methods = ['GET', 'POST', 'PUT', 'DELETE'];
-      const randomMethod = methods[Math.floor(Math.random() * methods.length)];
-      
-      const newLog: RequestLogType = {
-        id: Date.now().toString(),
-        endpointId: randomEndpoint.id,
-        method: randomMethod,
-        path: randomEndpoint.path,
-        headers: {
-          'content-type': 'application/json',
-          'user-agent': 'MockFlow-Client/1.0',
-        },
-        body: randomMethod === 'POST' || randomMethod === 'PUT' 
-          ? JSON.stringify({ data: 'sample request' }, null, 2)
-          : '',
-        timestamp: new Date().toISOString(),
-        responseStatus: randomEndpoint.statusCode,
-        responseTime: Math.floor(Math.random() * 500) + 50,
-      };
+  // Poll logs (simple M1 approach)
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const ls = await getLogs(200);
+        setLogs(ls);
+      } catch {
+        // ignore transient errors
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, []);
 
-      setLogs(prev => [newLog, ...prev].slice(0, 100)); // Keep last 100 logs
-    };
-
-    const interval = setInterval(simulateRequest, 10000); // Simulate request every 10 seconds
-    return () => clearInterval(interval);
-  }, [endpoints, setLogs]);
-
-  const handleSaveEndpoint = (endpointData: Omit<MockEndpoint, 'id' | 'createdAt'>) => {
-    if (editingEndpoint) {
-      setEndpoints(prev => prev.map(e => 
-        e.id === editingEndpoint.id 
-          ? { ...endpointData, id: editingEndpoint.id, createdAt: editingEndpoint.createdAt }
-          : e
-      ));
-    } else {
-      const newEndpoint: MockEndpoint = {
-        ...endpointData,
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-      };
-      setEndpoints(prev => [...prev, newEndpoint]);
+  const handleSaveEndpoint = async (endpointData: Omit<MockEndpoint, 'id' | 'createdAt'>) => {
+    try {
+      if (editingEndpoint) {
+        const updated = await updateEndpoint(editingEndpoint.id, endpointData);
+        setEndpoints(prev => prev.map(e => (e.id === updated.id ? updated : e)));
+      } else {
+        const created = await createEndpoint(endpointData);
+        setEndpoints(prev => [created, ...prev]);
+      }
+      setShowForm(false);
+      setEditingEndpoint(undefined);
+    } catch (e) {
+      alert(`Failed to save endpoint: ${String((e as Error)?.message || e)}`);
     }
-    setShowForm(false);
-    setEditingEndpoint(undefined);
   };
 
-  const handleDeleteEndpoint = (id: string) => {
-    if (confirm('Are you sure you want to delete this endpoint?')) {
+  const handleDeleteEndpoint = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this endpoint?')) return;
+    try {
+      await deleteEndpoint(id);
       setEndpoints(prev => prev.filter(e => e.id !== id));
       setLogs(prev => prev.filter(log => log.endpointId !== id));
+    } catch (e) {
+      alert(`Failed to delete endpoint: ${String((e as Error)?.message || e)}`);
     }
   };
 
-  const handleToggleActive = (id: string) => {
-    setEndpoints(prev => prev.map(e => 
-      e.id === id ? { ...e, isActive: !e.isActive } : e
-    ));
+  const handleToggleActive = async (id: string) => {
+    const target = endpoints.find(e => e.id === id);
+    if (!target) return;
+    try {
+      const updated = await updateEndpoint(id, { isActive: !target.isActive });
+      setEndpoints(prev => prev.map(e => (e.id === id ? updated : e)));
+    } catch (e) {
+      alert(`Failed to toggle endpoint: ${String((e as Error)?.message || e)}`);
+    }
   };
 
   const handleEditEndpoint = (endpoint: MockEndpoint) => {
@@ -101,7 +103,7 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'mockflow-backup.json';
+    a.download = 'waspceptor-backup.json';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -111,14 +113,27 @@ function App() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = JSON.parse(e.target?.result as string);
-        if (data.endpoints && data.logs) {
-          setEndpoints(data.endpoints);
+        if (Array.isArray(data.endpoints)) {
+          // For M1 simplicity: recreate endpoints locally and POST them
+          const created: MockEndpoint[] = [];
+          for (const ep of data.endpoints) {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { id, createdAt, ...rest } = ep as MockEndpoint;
+            try {
+              const newEp = await createEndpoint(rest as Omit<MockEndpoint, 'id' | 'createdAt'>);
+              created.push(newEp);
+            } catch {/* skip */}
+          }
+          setEndpoints(created);
+        }
+        if (Array.isArray(data.logs)) {
           setLogs(data.logs);
         }
-      } catch (error) {
+      } catch (_err) {
+        console.log("Error: ",_err)
         alert('Invalid backup file format');
       }
     };

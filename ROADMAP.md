@@ -8,7 +8,7 @@ Legend: [ ] not started, [~] in progress, [x] done
 
 ## Milestones
 
-- [ ] M1: Minimal real HTTP server + UI integration
+- [x] M1: Minimal real HTTP server + UI integration
 - [ ] M2: Rules-based matching and mock responses
 - [ ] M3: Request inbox, filtering, export, and replay
 - [ ] M4: Proxy/forwarding (passthrough) with recording

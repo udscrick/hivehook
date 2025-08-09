@@ -1,6 +1,6 @@
 import React from 'react';
 import { MockEndpoint } from '../types';
-import { Edit, Trash2, Play, Pause, Copy, ExternalLink } from 'lucide-react';
+import { Edit, Trash2, Play, Pause, Copy } from 'lucide-react';
 
 interface EndpointCardProps {
   endpoint: MockEndpoint;
@@ -20,7 +20,9 @@ const methodColors = {
 
 export function EndpointCard({ endpoint, onEdit, onDelete, onToggleActive, requestCount }: EndpointCardProps) {
   const copyEndpointUrl = () => {
-    const url = `${window.location.origin}/api${endpoint.path}`;
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const base = isLocal ? 'http://localhost:3000' : window.location.origin;
+    const url = `${base}/api${endpoint.path}`;
     navigator.clipboard.writeText(url);
   };
 
